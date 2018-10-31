@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Paper } from "@material-ui/core";
 
-export default class DrawingCanvas extends React.Component {
+export default class DrawingCanvas extends React.Component<{size:number}> {
   private prev: {x: number, y: number} = null;
   private canvas = React.createRef<HTMLCanvasElement>();
 
@@ -37,19 +37,20 @@ export default class DrawingCanvas extends React.Component {
     canvas.width = canvas.offsetWidth;
     canvas.height = canvas.offsetWidth; // make square
     const ctx = canvas.getContext("2d");
-    ctx.lineWidth = 16;
+    ctx.lineWidth = canvas.offsetWidth / this.props.size;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
   }
 
-  public capture(size: number) : ImageData {
+  public capture() : ImageData {
+    const { size } = this.props;
     const canvas = this.canvas.current;
     const resizedCanvas = document.createElement("canvas");
     resizedCanvas.width = size;
     resizedCanvas.height = size;
     const resizedContext = resizedCanvas.getContext("2d");
-    resizedContext.drawImage(canvas, 0, 0, resizedCanvas.width, resizedCanvas.height);
-    return resizedContext.getImageData(0,0, canvas.width, canvas.height)
+    resizedContext.drawImage(canvas, 0, 0, size, size);
+    return resizedContext.getImageData(0,0, size, size)
   }
 
   public clear() : void {

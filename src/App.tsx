@@ -1,9 +1,10 @@
 import * as React from "react";
 import Button from "@material-ui/core/Button";
-import { CssBaseline, AppBar, Card, Drawer, Toolbar, IconButton, Typography, List, ListItem, ListItemText, CardContent, Grid, CardHeader, Avatar, LinearProgress } from "@material-ui/core";
-import MenuIcon from "@material-ui/icons/Menu";
+import { CssBaseline, AppBar, Card, Drawer, Toolbar, IconButton, Typography, List, ListItem, ListItemText, CardContent, Grid, CardHeader, Avatar, LinearProgress, ListItemIcon } from "@material-ui/core";
+import { CloudUpload, CloudDownload, Menu } from "@material-ui/icons";
 import DrawingCanvas from "./DrawingCanvas";
 import * as tf from "@tensorflow/tfjs";
+import { buildNeuralNet } from "./cnn";
 import { CustomCallbackConfig } from "@tensorflow/tfjs";
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -14,7 +15,6 @@ interface AppState {
   numCaptured: number, 
   epoch: number, 
   loss: number, 
-  prediction: string,
   trained: boolean,
   training: boolean,
 };
@@ -22,9 +22,9 @@ interface AppState {
 export default class Add extends React.Component<{}, AppState> {
   private drawing = React.createRef<DrawingCanvas>();
   
-  private trainingData : tf.Tensor[] = [];
+  private trainingData : ImageData[] = [];
   private trainingLabels : number[] = [];
-  private neuralNet : tf.Model = this.buildNeuralNet();
+  private neuralNet : tf.Model = buildNeuralNet(ALPHABET.length);
   
   state = { 
     open: false, 
@@ -32,7 +32,6 @@ export default class Add extends React.Component<{}, AppState> {
     numCaptured: 0, 
     epoch: -1, 
     loss: 1, 
-    prediction: null,
     training: false,
     trained: false,
   };
@@ -44,7 +43,7 @@ export default class Add extends React.Component<{}, AppState> {
   
   private next = () => {
     const drawing = this.drawing.current;
-    this.trainingData.push(tf.fromPixels(drawing.capture(28), 1));
+    this.trainingData.push(drawing.capture());
     this.trainingLabels.push(ALPHABET.indexOf(this.state.char));
     drawing.clear();
     this.setState({ char: this.randomChar(), numCaptured: this.state.numCaptured + 1 });
@@ -60,19 +59,19 @@ export default class Add extends React.Component<{}, AppState> {
     };
 
     await this.neuralNet.fit(
-      tf.stack(this.trainingData), 
+      tf.tidy(() => tf.stack(this.trainingData.map(img => tf.fromPixels(img,1)))), 
       tf.oneHot(this.trainingLabels, ALPHABET.length),
-      { epochs: 1000, callbacks });
+      { epochs: 100, callbacks });
 
     this.setState({ training: false, trained: true });
   };
 
   private predict = async () => {
     const drawing = this.drawing.current;
-    const prediction = this.neuralNet.predict([tf.fromPixels(drawing.capture(28))]);
+    const prediction : any = this.neuralNet.predict(tf.tidy(() => tf.stack([tf.fromPixels(drawing.capture(), 1)])));
     drawing.clear();
 
-    const predictionValues = await prediction[0].data();
+    const predictionValues = await prediction.data();
 
     let maxValue = 0;
     let maxIndex = -1;
@@ -83,49 +82,25 @@ export default class Add extends React.Component<{}, AppState> {
       }
     }
 
-    this.setState({ prediction: ALPHABET[maxIndex] });
+    alert(`Prediction: ${ALPHABET[maxIndex]}`);
   };
+
+  private loadModel = async () => {
+    const model = await tf.loadModel("localstorage://handwriting-model");
+    model.compile({ loss: "categoricalCrossentropy", optimizer: "adam" });
+    this.neuralNet = model;
+    alert("Model Loaded");
+  };
+
+  private saveModel = async () => {
+    await this.neuralNet.save("localstorage://handwriting-model");
+    alert("Model Saved");
+  }
+
 
   private randomChar() {
     return ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
   }
-
-  private buildNeuralNet() : tf.Model {
-    const model = tf.sequential();
-    
-    model.add(tf.layers.conv2d({ 
-      inputShape: [28,28,1],
-      filters: 8, 
-      kernelSize: 5,
-      strides: 1, 
-      activation: "relu",
-      kernelInitializer: "VarianceScaling"
-    }));
-    
-    model.add(tf.layers.maxPooling2d({ poolSize: [2,2], strides: [2,2] }));
-
-    model.add(tf.layers.conv2d({ 
-      filters: 16, 
-      kernelSize: 5, 
-      strides: 1, 
-      activation: "relu",
-      kernelInitializer: "VarianceScaling"
-    }));
-
-    model.add(tf.layers.maxPooling2d({ poolSize: [2,2], strides: [2,2] }));
-
-    model.add(tf.layers.flatten());
-
-    model.add(tf.layers.dense({ 
-      units: ALPHABET.length, 
-      activation: "softmax",
-      kernelInitializer: "VarianceScaling"
-    }));
-
-    model.compile({ loss: "categoricalCrossentropy", optimizer: "adam" });
-    
-    return model;
-  };
 
   render() {
     const progress = Math.min(100,this.state.numCaptured);
@@ -135,16 +110,21 @@ export default class Add extends React.Component<{}, AppState> {
       <AppBar position="fixed">
         <Toolbar>
           <IconButton onClick={this.open}>
-            <MenuIcon />
+            <Menu />
           </IconButton>
           <Typography component="h1" variant="h6">TFJS Image</Typography>
         </Toolbar>
       </AppBar>
       <Drawer open={this.state.open} onBackdropClick={this.close}>
-        <List>
-          <ListItem button><ListItemText>About</ListItemText></ListItem>
-          <ListItem button><ListItemText>Train</ListItemText></ListItem>
-          <ListItem button><ListItemText>Predict</ListItemText></ListItem>
+        <List style={{minWidth: "300px"}}>
+          <ListItem button onClick={this.loadModel}>
+            <ListItemIcon><CloudUpload /></ListItemIcon>
+            <ListItemText>Load</ListItemText>
+          </ListItem>
+          <ListItem button onClick={this.saveModel}>
+            <ListItemIcon><CloudDownload /></ListItemIcon>
+            <ListItemText>Save</ListItemText>
+          </ListItem>
         </List>
       </Drawer>
       <Grid component="main" container style={{marginTop: "56px"}}>
@@ -155,12 +135,12 @@ export default class Add extends React.Component<{}, AppState> {
               <Typography component="p">Write the letter that appears below in your own handwriting</Typography>
               <Avatar style={{width:60, height:60, margin: "10px auto"}}>{this.state.char}</Avatar>
               <LinearProgress style={{marginBottom: "10px" }} variant="determinate" value={progress} />
-              <DrawingCanvas ref={this.drawing}/>
+              <DrawingCanvas size={28} ref={this.drawing}/>
               <div style={{marginTop: "10px"}}>
                 <Button onClick={this.clear} style={{marginRight: "10px"}} variant="contained">Clear</Button>
                 <Button onClick={this.next} style={{marginRight: "10px"}} variant="contained">Next</Button>
-                <Button onClick={this.train} style={{marginRight: "10px"}} disabled={this.state.training} variant="contained">Train Now</Button>
-                <Button onClick={this.predict} style={{marginRight: "10px"}} disabled={!this.state.trained} variant="contained">Predict</Button>
+                <Button onClick={this.train} style={{marginRight: "10px"}} disabled={this.state.training} variant="contained">Train</Button>
+                <Button onClick={this.predict} disabled={!this.state.trained} variant="contained">Predict</Button>
               </div>
               {this.state.epoch >= 0 ? <Typography>Epoch: {this.state.epoch} / Loss: {this.state.loss.toFixed(3)}</Typography> : null}
             </CardContent>
